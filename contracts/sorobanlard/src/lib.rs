@@ -1532,6 +1532,68 @@ impl SorobanLardContract {
         );
     }
 
+    /// Read-only query for the pending certificate revocation challenge.
+    ///
+    /// Returns the challenge status and deadline for a certificate, or `None`
+    /// when no challenge has ever been opened for it. This function performs no
+    /// storage writes; it only reads the challenge record and extends its TTL.
+    ///
+    /// Authorization mirrors `get_certificate`: only the certificate holder
+    /// (student), the course instructor, or an admin may query the challenge.
+    /// Any other caller panics with "unauthorized".
+    ///
+    /// # Arguments
+    /// - `caller`         — address querying the challenge (must sign)
+    /// - `certificate_id` — the certificate whose challenge is being queried
+    ///
+    /// # Returns
+    /// - `Some(RevocationChallengeInfo { status, deadline })` when a challenge
+    ///   record exists. `status` is `Open` while the challenge window is active,
+    ///   `Completed` once it has been finalized, and `None` if the record exists
+    ///   but carries no active status. `deadline` is the ledger sequence at which
+    ///   an open challenge can be finalized.
+    /// - `None` when no challenge has been opened for the certificate.
+    pub fn get_revocation_challenge(
+        env: Env,
+        caller: Address,
+        certificate_id: String,
+    ) -> Option<RevocationChallengeInfo> {
+        caller.require_auth();
+
+        let certificate = Self::get_certificate_internal(&env, &certificate_id)
+            .unwrap_or_else(|| panic!("certificate not found"));
+
+        let is_admin = Self::is_admin(&env, &caller);
+        let is_holder = caller == certificate.student;
+        let is_instructor = match Self::get_course_internal(&env, &certificate.course_id) {
+            Some(course) => caller == course.instructor,
+            None => false,
+        };
+
+        if !is_admin && !is_holder && !is_instructor {
+            panic!("unauthorized");
+        }
+
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let challenge_key = DataKey::RevocationChallenge(certificate_id.clone());
+        let challenge: Option<RevocationChallenge> =
+            env.storage().persistent().get(&challenge_key);
+
+        match challenge {
+            None => None,
+            Some(challenge) => {
+                Self::extend_persistent_ttl(&env, &challenge_key);
+                Some(RevocationChallengeInfo {
+                    status: challenge.status,
+                    deadline: challenge.deadline,
+                })
+            }
+        }
+    }
+
     /// Instructor or admin pauses a course.
     /// Existing enrollments are unaffected — students can still access content.
     /// New enrollments are blocked until the course is unpaused.
@@ -6286,6 +6348,68 @@ impl SorobanLardContract {
         );
     }
 
+    /// Read-only query for the pending certificate revocation challenge.
+    ///
+    /// Returns the challenge status and deadline for a certificate, or `None`
+    /// when no challenge has ever been opened for it. This function performs no
+    /// storage writes; it only reads the challenge record and extends its TTL.
+    ///
+    /// Authorization mirrors `get_certificate`: only the certificate holder
+    /// (student), the course instructor, or an admin may query the challenge.
+    /// Any other caller panics with "unauthorized".
+    ///
+    /// # Arguments
+    /// - `caller`         — address querying the challenge (must sign)
+    /// - `certificate_id` — the certificate whose challenge is being queried
+    ///
+    /// # Returns
+    /// - `Some(RevocationChallengeInfo { status, deadline })` when a challenge
+    ///   record exists. `status` is `Open` while the challenge window is active,
+    ///   `Completed` once it has been finalized, and `None` if the record exists
+    ///   but carries no active status. `deadline` is the ledger sequence at which
+    ///   an open challenge can be finalized.
+    /// - `None` when no challenge has been opened for the certificate.
+    pub fn get_revocation_challenge(
+        env: Env,
+        caller: Address,
+        certificate_id: String,
+    ) -> Option<RevocationChallengeInfo> {
+        caller.require_auth();
+
+        let certificate = Self::get_certificate_internal(&env, &certificate_id)
+            .unwrap_or_else(|| panic!("certificate not found"));
+
+        let is_admin = Self::is_admin(&env, &caller);
+        let is_holder = caller == certificate.student;
+        let is_instructor = match Self::get_course_internal(&env, &certificate.course_id) {
+            Some(course) => caller == course.instructor,
+            None => false,
+        };
+
+        if !is_admin && !is_holder && !is_instructor {
+            panic!("unauthorized");
+        }
+
+        env.storage()
+            .instance()
+            .extend_ttl(Self::INSTANCE_TTL_THRESHOLD, Self::INSTANCE_TTL_EXTEND_TO);
+
+        let challenge_key = DataKey::RevocationChallenge(certificate_id.clone());
+        let challenge: Option<RevocationChallenge> =
+            env.storage().persistent().get(&challenge_key);
+
+        match challenge {
+            None => None,
+            Some(challenge) => {
+                Self::extend_persistent_ttl(&env, &challenge_key);
+                Some(RevocationChallengeInfo {
+                    status: challenge.status,
+                    deadline: challenge.deadline,
+                })
+            }
+        }
+    }
+
     /// Retrieve a persistent arbitration case record.
     ///
     /// Returns `None` if no case has been opened for this (caller, course_id) pair.
@@ -6573,6 +6697,13 @@ impl SorobanLardContract {
             course_id: course_id.clone(),
         };
         env.storage().persistent().get(&key)
+    }
+
+    /// Read-only helper that loads a certificate record without extending TTL.
+    fn get_certificate_internal(env: &Env, certificate_id: &String) -> Option<Certificate> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Certificate(certificate_id.clone()))
     }
 
     /// Complete a payment with a risk assessment.

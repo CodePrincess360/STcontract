@@ -206,6 +206,41 @@ proptest! {
         prop_assert_eq!(client.get_instructor_total_earnings(&e.instructor), instructor);
     }
 
+    /// Issue #77: for prices that are not multiples of 100 the percentage
+    /// split leaves a division remainder. The documented rule is truncation:
+    /// `platform = price * pct / 100` (integer division, remainder dropped),
+    /// and the remainder is retained by the instructor share so that
+    /// `platform + instructor == price` exactly.
+    #[test]
+    fn prop_fee_split_rounding_for_non_hundred_prices(
+        price in (MIN_PRICE..=MAX_PRICE).prop_filter(
+            "price must not be divisible by 100",
+            |p| p % 100 != 0,
+        ),
+        token_fee in fee_bps(),
+        course_fee_pct in 1u32..=100,
+    ) {
+        let e = enroll_with(price, token_fee, course_fee_pct);
+        let client = SorobanLardContractClient::new(&e.env, &e.contract_id);
+
+        let enrollment = client
+            .get_enrollment(&e.student, &e.student, &e.course_id)
+            .unwrap();
+        let platform = enrollment.platform_amount;
+        let instructor = enrollment.instructor_amount;
+
+        // The effective percentage is the course override, floored at the
+        // live per-token rate (mirrors `enroll_with`'s normalisation).
+        let effective_pct = course_fee_pct.max((token_fee + 99) / 100) as i128;
+
+        prop_assert_eq!(enrollment.amount_paid, price);
+        prop_assert_eq!(platform, price * effective_pct / 100);
+        prop_assert_eq!(platform + instructor, price);
+        prop_assert!(platform >= 0 && instructor >= 0);
+        // The remainder (if any) is retained by the instructor share.
+        prop_assert_eq!(instructor, price - price * effective_pct / 100);
+    }
+
     /// `withdraw_earnings()` moves exactly the requested amount (or the full
     /// balance for `amount = 0`), never leaves a negative balance, and
     /// rejects over-withdrawals and negative amounts.

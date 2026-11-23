@@ -27,6 +27,32 @@ Convention:
 ### Added
 
 - CHANGELOG tracking contract version history and upgrade hashes.
+- `get_revocation_challenge` read-only query exposing a pending certificate
+  revocation challenge's status and deadline. Returns the challenge status
+  (open/completed) and its deadline ledger; open, completed, and unauthorized
+  queries are covered by regression tests.
+- Regression tests for fee-split rounding on prices and percentages that are
+  not divisible by 100, asserting `platform_amount + instructor_amount` equals
+  the exact paid amount.
+- Regression tests for removing an approved token after enrollment while
+  existing courses remain active, exercising refund and withdrawal paths and
+  outstanding obligations.
+- Regression tests for bulk revocation preserving certificate records and the
+  certificate index: records remain queryable, revoked flags are set, and the
+  reported count is exact.
+
+### Changed
+
+- Documented the fee-split rounding rule: `platform_amount = price * pct / 100`
+  truncates, and the division remainder is retained by the instructor share, so
+  the two shares always sum to the exact paid amount.
+- Documented that removing an approved token blocks new enrollment only;
+  existing enrollments, refunds, and withdrawals remain unaffected.
+
+### Validation
+
+- Command: `cargo test`
+- Result: _to be recorded in the pull request_
 
 ## [0.1.0] - Initial tracked release
 

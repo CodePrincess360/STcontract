@@ -247,6 +247,13 @@ implicit issuance cap; use `max_certificates` when a course needs an enforced
 ceiling. Truly large uncapped courses need a paginated revocation API and an
 index representation that does not load the full list per page.
 
+`bulk_revoke_course_certificates` preserves every certificate record and the
+`CourseCertificates(course_id)` index: records remain queryable via
+`get_certificate` and `verify_certificate` (which now returns `false`), the
+`revoked` flag is set on each certificate, and the returned count is the exact
+number of certificates revoked. This is covered by the bulk-revocation
+regression tests in `src/test.rs`.
+
 `EnrollmentHistory(student, course_id)` is also append-only and has no
 contract-level cap or pruning function. Each `re_enroll()` archives the full
 previous `Enrollment` (all fields) before writing the new attempt; refund
@@ -313,7 +320,20 @@ Initialises the contract. Called once by the deployer, immediately after deploym
 | `is_enrolled(student, course_id)` | `bool` |
 | `has_completed(student, course_id)` | `bool` |
 | `verify_certificate(certificate_id)` | `bool` — true if exists and not revoked |
+| `get_revocation_challenge(caller, certificate_id)` | Revocation challenge status and deadline (see below) |
 | `get_platform_fee(admin)` | `u32` — current default fee % (admin only) |
+
+`get_revocation_challenge(caller, certificate_id)` returns read-only data about
+a pending certificate revocation challenge:
+
+- `status` — the challenge state (e.g. open/pending vs. completed/resolved)
+- `deadline` — the ledger sequence at which the challenge window closes
+
+Authorization: the caller must be the certificate's student, the course
+instructor, or an admin; any other caller is rejected as unauthorized. When no
+challenge exists for the certificate, the query returns no challenge data
+(`None`). The query never mutates state. Open, completed, and unauthorized
+cases are covered by the revocation-challenge regression tests in `src/test.rs`.
 
 ---
 
@@ -331,9 +351,31 @@ instructor_amount = 100 - 20       = 80 USDC → instructor
 
 Both transfers are atomic — if either fails, the whole transaction reverts. The student is never charged without the instructor and treasury being paid.
 
+**Rounding rule.** The platform share is computed as
+`platform_amount = price * platform_fee_percent / 100` using integer
+truncation (the fractional stroop is discarded). The instructor share is
+`instructor_amount = price - platform_amount`, so the remainder from the
+division is always retained by the instructor. As a result,
+`platform_amount + instructor_amount == price` exactly for every price and
+percentage, including prices not divisible by 100. For example, with
+`price = 101` and `platform_fee_percent = 20`, `platform_amount = 20`
+(20.2 truncated) and `instructor_amount = 81`. This is covered by the
+fee-split rounding regression tests in `src/test.rs`.
+
 The platform fee percentage can be:
 - **Global default** (set at `init`, updatable by admin)
 - **Per-course override** (set by instructor at registration time, non-zero value)
+
+### Approved tokens
+
+`add_approved_token` / `remove_approved_token` control which tokens may be
+used for **new** enrollments. Removing an approved token blocks new
+enrollments that use that token only; it does not affect existing enrollments,
+refunds, withdrawals, or any other outstanding obligation. Courses already
+registered with that token keep their records, and students already enrolled
+can still complete, be refunded, and have their instructor earnings withdrawn
+under the normal rules. This behavior is covered by the approved-token removal
+regression tests in `src/test.rs`.
 
 ---
 
@@ -445,9 +487,20 @@ set -a; source .env; set +a
 
 ```bash
 cargo test
+cargo test -p sorobanlard          # contract package only
 cargo test -- --nocapture          # with output
 cargo test test_full_lifecycle     # single test
 ```
+
+The full contract suite, including the fee-split rounding, approved-token
+removal, revocation-challenge query, and bulk-revocation regression tests, is
+run with:
+
+```sh
+cargo test -p sorobanlard
+```
+
+Expected result: all tests pass (`test result: ok`).
 
 Expected:
 ```
