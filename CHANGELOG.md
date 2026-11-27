@@ -27,6 +27,19 @@ Convention:
 ### Added
 
 - CHANGELOG tracking contract version history and upgrade hashes.
+- Documented and tested fee override semantics: a zero per-course fee means
+  "inherit the global default fee" rather than an explicit free override.
+  Covered by registration and enrollment regression tests.
+- Documented and tested certificate expiry boundary rule: `verify_certificate`
+  treats a certificate as valid strictly before `expires_at_ledger` and expired
+  at and after that ledger. Covered by before/at/after boundary tests.
+- Documented and tested instructor-signature enforcement during certificate
+  issuance: an authorized admin issuance call with a missing or mismatched
+  instructor signature is rejected without creating a certificate record or
+  emitting an issued event.
+- Documented and tested revocation challenge-period boundary: challenge and
+  finalization actions change revocation state only at the documented boundary
+  (before/at/after the configured challenge period).
 - `get_revocation_challenge` read-only query exposing a pending certificate
   revocation challenge's status and deadline. Returns the challenge status
   (open/completed) and its deadline ledger; open, completed, and unauthorized
@@ -51,8 +64,8 @@ Convention:
 
 ### Validation
 
-- Command: `cargo test`
-- Result: _to be recorded in the pull request_
+- `cargo test` — all tests pass, including the new boundary and rejection
+  regression tests above.
 
 ## [0.1.0] - Initial tracked release
 
